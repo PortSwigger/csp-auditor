@@ -24,6 +24,8 @@ import com.esotericsoftware.minlog.Log;
 import org.json.JSONException;
 import org.json.JSONObject;
 
+import javax.swing.*;
+
 /**
  * Tab that contains three parts :
  * - Configuration
@@ -238,18 +240,37 @@ public class ConfigurationHelperTab implements ITab, CspGeneratorPanelController
     public void refreshDomains() {
 
         Log.debug("Refreshing the domain list");
-        IHttpRequestResponse[] reqResponses = callbacks.getProxyHistory();
+        DomainRefreshTask task = new DomainRefreshTask();
+        task.execute();
+    }
+
+    protected class DomainRefreshTask extends SwingWorker<SortedSet<String>, String> {
+
         SortedSet<String> hosts = new TreeSet<>();
-        for (IHttpRequestResponse reqResp : reqResponses) {
-            IRequestInfo reqInfo = helpers.analyzeRequest(reqResp.getHttpService(), reqResp.getRequest());
-            hosts.add(reqInfo.getUrl().getProtocol() + "://" + reqInfo.getUrl().getHost());
+
+        @Override
+        public SortedSet<String> doInBackground() {
+            IHttpRequestResponse[] reqResponses = callbacks.getProxyHistory();
+            hosts = new TreeSet<>();
+            for (IHttpRequestResponse reqResp : reqResponses) {
+                if ( !isCancelled() ) {
+                    IRequestInfo reqInfo = helpers.analyzeRequest(reqResp.getHttpService(), reqResp.getRequest());
+                    String domain = reqInfo.getUrl().getProtocol() + "://" + reqInfo.getUrl().getHost();
+                    hosts.add(domain);
+                    publish(domain);
+                }
+            }
+
+            return hosts;
         }
 
-//        for (String h : hosts) {
-//            Log.debug(h);
-//        }
+        @Override
+        public void process(List<String> domains) {
+            for (String domain : domains) {
+                panel.addDomain(domain);
+            }
+        }
 
-        panel.addDomains(hosts);
     }
 
     @Override

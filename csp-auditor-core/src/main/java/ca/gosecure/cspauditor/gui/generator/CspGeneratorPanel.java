@@ -1,6 +1,7 @@
 package ca.gosecure.cspauditor.gui.generator;
 
 import com.esotericsoftware.minlog.Log;
+import main.java.ca.gosecure.cspauditor.gui.generator.SortedUniqueComboBoxModel;
 
 import javax.swing.*;
 import javax.swing.event.ListSelectionEvent;
@@ -145,6 +146,10 @@ public class CspGeneratorPanel {
         }
     }
 
+    public void addDomain(String domain) {
+        comboBox1.addItem(domain);
+    }
+
     ////Configurations
 
     public void setConfiguration(Component configuration) {
@@ -233,6 +238,7 @@ public class CspGeneratorPanel {
         panel2.setEnabled(true);
         panel1.add(panel2, BorderLayout.NORTH);
         comboBox1 = new JComboBox();
+        comboBox1.setModel(new SortedUniqueComboBoxModel());
         panel2.add(comboBox1, BorderLayout.CENTER);
         final JPanel panel3 = new JPanel();
         panel3.setLayout(new FlowLayout(FlowLayout.CENTER, 5, 5));
