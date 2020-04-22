@@ -70,127 +70,143 @@ public class ConfigurationHelperTab implements ITab, CspGeneratorPanelController
 
     @Override
     public void analyzeDomain(String domain) {
+        Log.debug("Analyzing domain " + domain);
+        AnalyzeDomainTask task = new AnalyzeDomainTask(domain);
+        task.execute();
+    }
 
-        IHttpRequestResponse[] reqResponses = callbacks.getProxyHistory();
+    protected class AnalyzeDomainTask extends SwingWorker<Void, Void> {
 
-        ContentSecurityPolicy csp = new ContentSecurityPolicy("CSP");
-        csp.addDirectiveValue("default-src","'self'");
-        try {
-            URL domainSelected = new URL(domain);
-            Log.debug("Analysing domain "+domain);
-            panel.clearResources();
-            panel.clearInlineScript();
-            panel.clearReports();
-            int id = 0;
-            for (IHttpRequestResponse reqResp : reqResponses) {
-                id++;
-                Log.debug("Request "+id);
-                IRequestInfo reqInfo = helpers.analyzeRequest(reqResp.getHttpService(), reqResp.getRequest());
-                if (reqResp.getResponse() == null) continue;
-                IResponseInfo respInfo = helpers.analyzeResponse(reqResp.getResponse());
+        String domain;
 
-                String mimeType = respInfo.getInferredMimeType().toUpperCase(); //Uppercase is applied because to make the content-type uniform
-
-                URL urlRequested = reqInfo.getUrl();
-                String urlString = getUrl(reqInfo);
-                String protoAndHost = urlRequested.getProtocol() + "://" + urlRequested.getHost();
-
-                boolean isRequestToDomain = protoAndHost.equals(domain);
-
-                //Finding inline script
-
-                String host = getHeader("host", reqInfo.getHeaders());
-                if (isRequestToDomain) {//Same-Origin
-                    if (mimeType.equals("HTML")) {
-                        List<String> problemInline = DetectInlineJavascript.getInstance().findInlineJs(new String(reqResp.getResponse()));
-
-                        for (String line : problemInline)
-                            panel.addInlineScript(String.valueOf(id), urlString, line);
-                    }
-                }
-
-
-                //Finding external resources
-
-                if (!isRequestToDomain) {//Different-Origin
-
-                    String referrer = getHeader("referer", reqInfo.getHeaders());
-                    if (referrer.startsWith("http://") || referrer.startsWith("https://")) { //Just to make sure the URL will be parsable
-                        URL referrerUrl = new URL(referrer);
-                        if (domainSelected.getHost().equals(referrerUrl.getHost())) {
-                            panel.addResource(String.valueOf(id), urlString, mimeType);
-                            mimeTypeToDirective(mimeType, protoAndHost, csp);
-
-                        }
-                    }
-                }
-
-
-                byte[] completeRequest = reqResp.getRequest();
-                int startOffset = reqInfo.getBodyOffset();
-                if(completeRequest.length - startOffset != 0) { //Skip GET request
-                    byte[] part = Arrays.copyOfRange(completeRequest, startOffset, completeRequest.length);
-                    String body = new String(part);
-                    if (body.contains("{\"csp-report\":{")) {
-                        try {
-                            JSONObject rootJson = new JSONObject(body);
-                            String documentUri       = rootJson.getJSONObject("csp-report").getString("document-uri");
-                            String originalPolicy    = rootJson.getJSONObject("csp-report").getString("original-policy");
-                            // chrome sends just the directive. firefox sends directive + sources. e.g. script-src https://domain.com ...
-                            String violatedDirective = rootJson.getJSONObject("csp-report").getString("violated-directive").split(" ")[0];
-                            String blockedUri;
-
-                            if (violatedDirective.equalsIgnoreCase("frame-ancestors")) {
-                                // the report's blocked-uri is the page that got framed, not the one that needs to be added to the policy.
-                                blockedUri = rootJson.getJSONObject("csp-report").getString("referrer").split(" ")[0];
-                                if (blockedUri.isEmpty())
-                                    continue; // browsers won't always send referrer, in which case we can't use the report.
-                            }
-                            else{
-                                blockedUri = rootJson.getJSONObject("csp-report").getString("blocked-uri");
-                            }
-
-                            String newSrc = blockedUri;
-                            try {
-                                URL url = new URL(blockedUri);
-                                String port = url.getPort() == -1 ? "" : ":" + Integer.toString(url.getPort());
-                                newSrc = url.getProtocol() + "://" + url.getHost() + port;
-                            }
-                            catch (MalformedURLException e) {
-                                if (blockedUri.equalsIgnoreCase("inline")
-                                        || blockedUri .equalsIgnoreCase("eval")){
-                                    newSrc = "'unsafe-" + blockedUri + "'";
-                                }
-                                else if (blockedUri.equalsIgnoreCase("data") || blockedUri.equalsIgnoreCase("blob")){
-                                    newSrc = blockedUri + ":";
-                                }
-                                else {
-                                    Log.error("Invalid blocked uri", blockedUri);
-                                }
-                            }
-
-                            if (newSrc.equalsIgnoreCase(domain)) {
-                                newSrc = "'self'";
-                            }
-
-                            csp.addDirectiveValue(violatedDirective, newSrc);
-                            panel.addReport(String.valueOf(id), blockedUri, documentUri, originalPolicy, violatedDirective);
-                        }
-                        catch (JSONException e){ //Invalid csp-report
-                            Log.error("Invalid CSP report at "+urlString);
-                        }
-                    }
-                }
-
-            }
-        } catch (Exception e) {
-            Log.error(e.getMessage(),e);
+        public AnalyzeDomainTask(String domain) {
+            this.domain = domain;
         }
 
+        @Override
+        public Void doInBackground() {
+            IHttpRequestResponse[] reqResponses = callbacks.getProxyHistory();
 
-        csp.addDirectiveValue("report-uri", "/change-this-uri/");
-        displayConfiguration(csp);
-        Log.debug("Done analyzing "+domain);
+            ContentSecurityPolicy csp = new ContentSecurityPolicy("CSP");
+            csp.addDirectiveValue("default-src","'self'");
+            try {
+                URL domainSelected = new URL(domain);
+                Log.debug("Analysing domain " + domain);
+                panel.clearResources();
+                panel.clearInlineScript();
+                panel.clearReports();
+                int id = 0;
+                for (IHttpRequestResponse reqResp : reqResponses) {
+                    id++;
+                    Log.debug("Request "+id);
+                    IRequestInfo reqInfo = helpers.analyzeRequest(reqResp.getHttpService(), reqResp.getRequest());
+                    if (reqResp.getResponse() == null) continue;
+                    IResponseInfo respInfo = helpers.analyzeResponse(reqResp.getResponse());
+
+                    String mimeType = respInfo.getInferredMimeType().toUpperCase(); //Uppercase is applied because to make the content-type uniform
+
+                    URL urlRequested = reqInfo.getUrl();
+                    String urlString = getUrl(reqInfo);
+                    String protoAndHost = urlRequested.getProtocol() + "://" + urlRequested.getHost();
+
+                    boolean isRequestToDomain = protoAndHost.equals(domain);
+
+                    //Finding inline script
+
+                    String host = getHeader("host", reqInfo.getHeaders());
+                    if (isRequestToDomain) {//Same-Origin
+                        if (mimeType.equals("HTML")) {
+                            List<String> problemInline = DetectInlineJavascript.getInstance().findInlineJs(new String(reqResp.getResponse()));
+
+                            for (String line : problemInline)
+                                panel.addInlineScript(String.valueOf(id), urlString, line);
+                        }
+                    }
+
+
+                    //Finding external resources
+
+                    if (!isRequestToDomain) {//Different-Origin
+
+                        String referrer = getHeader("referer", reqInfo.getHeaders());
+                        if (referrer.startsWith("http://") || referrer.startsWith("https://")) { //Just to make sure the URL will be parsable
+                            URL referrerUrl = new URL(referrer);
+                            if (domainSelected.getHost().equals(referrerUrl.getHost())) {
+                                panel.addResource(String.valueOf(id), urlString, mimeType);
+                                mimeTypeToDirective(mimeType, protoAndHost, csp);
+
+                            }
+                        }
+                    }
+
+                    byte[] completeRequest = reqResp.getRequest();
+                    int startOffset = reqInfo.getBodyOffset();
+                    if(completeRequest.length - startOffset != 0) { //Skip GET request
+                        byte[] part = Arrays.copyOfRange(completeRequest, startOffset, completeRequest.length);
+                        String body = new String(part);
+                        if (body.contains("{\"csp-report\":{")) {
+                            try {
+                                JSONObject rootJson = new JSONObject(body);
+                                String documentUri       = rootJson.getJSONObject("csp-report").getString("document-uri");
+                                String originalPolicy    = rootJson.getJSONObject("csp-report").getString("original-policy");
+                                // chrome sends just the directive. firefox sends directive + sources. e.g. script-src https://domain.com ...
+                                String violatedDirective = rootJson.getJSONObject("csp-report").getString("violated-directive").split(" ")[0];
+                                String blockedUri;
+
+                                if (violatedDirective.equalsIgnoreCase("frame-ancestors")) {
+                                    // the report's blocked-uri is the page that got framed, not the one that needs to be added to the policy.
+                                    blockedUri = rootJson.getJSONObject("csp-report").getString("referrer").split(" ")[0];
+                                    if (blockedUri.isEmpty())
+                                        continue; // browsers won't always send referrer, in which case we can't use the report.
+                                }
+                                else{
+                                    blockedUri = rootJson.getJSONObject("csp-report").getString("blocked-uri");
+                                }
+
+                                String newSrc = blockedUri;
+                                try {
+                                    URL url = new URL(blockedUri);
+                                    String port = url.getPort() == -1 ? "" : ":" + Integer.toString(url.getPort());
+                                    newSrc = url.getProtocol() + "://" + url.getHost() + port;
+                                }
+                                catch (MalformedURLException e) {
+                                    if (blockedUri.equalsIgnoreCase("inline")
+                                            || blockedUri .equalsIgnoreCase("eval")){
+                                        newSrc = "'unsafe-" + blockedUri + "'";
+                                    }
+                                    else if (blockedUri.equalsIgnoreCase("data") || blockedUri.equalsIgnoreCase("blob")){
+                                        newSrc = blockedUri + ":";
+                                    }
+                                    else {
+                                        Log.error("Invalid blocked uri", blockedUri);
+                                    }
+                                }
+
+                                if (newSrc.equalsIgnoreCase(domain)) {
+                                    newSrc = "'self'";
+                                }
+
+                                csp.addDirectiveValue(violatedDirective, newSrc);
+                                panel.addReport(String.valueOf(id), blockedUri, documentUri, originalPolicy, violatedDirective);
+                            }
+                            catch (JSONException e){ //Invalid csp-report
+                                Log.error("Invalid CSP report at "+urlString);
+                            }
+                        }
+                    }
+
+                }
+            } catch (Exception e) {
+                Log.error(e.getMessage(),e);
+            }
+
+            csp.addDirectiveValue("report-uri", "/change-this-uri/");
+            displayConfiguration(csp);
+            Log.debug("Done analyzing "+domain);
+
+            return null;
+        }
+
     }
 
     private void mimeTypeToDirective(String mimeType,String host,ContentSecurityPolicy csp) {
@@ -238,7 +254,6 @@ public class ConfigurationHelperTab implements ITab, CspGeneratorPanelController
 
     @Override
     public void refreshDomains() {
-
         Log.debug("Refreshing the domain list");
         DomainRefreshTask task = new DomainRefreshTask();
         task.execute();
