@@ -1,5 +1,5 @@
 group 'csp-auditor'
-version '1.0-SNAPSHOT'
+version '2.0-SNAPSHOT'
 
 subprojects { //Common configuration for subprojects
     apply plugin: 'java'
