@@ -3,7 +3,9 @@ package burp.tab;
 import burp.IBurpExtenderCallbacks;
 import burp.IExtensionHelpers;
 import burp.IHttpRequestResponse;
+import burp.IHttpService;
 import burp.IMessageEditor;
+import burp.IMessageEditorController;
 import burp.IRequestInfo;
 import burp.IResponseInfo;
 import burp.ITab;
@@ -13,6 +15,7 @@ import ca.gosecure.cspauditor.gui.generator.CspGeneratorPanelController;
 import java.awt.*;
 import java.net.MalformedURLException;
 import java.net.URL;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.SortedSet;
@@ -98,16 +101,34 @@ public class ConfigurationHelperTab implements ITab, CspGeneratorPanelController
                 int id = 0;
                 for (IHttpRequestResponse reqResp : reqResponses) {
                     id++;
-                    Log.debug("Request "+id);
+                    //Log.debug("Request "+id);
                     IRequestInfo reqInfo = helpers.analyzeRequest(reqResp.getHttpService(), reqResp.getRequest());
                     if (reqResp.getResponse() == null) continue;
                     IResponseInfo respInfo = helpers.analyzeResponse(reqResp.getResponse());
 
-                    String mimeType = respInfo.getInferredMimeType().toUpperCase(); //Uppercase is applied because to make the content-type uniform
-
+                    String mimeType = respInfo.getStatedMimeType() != "" ? respInfo.getStatedMimeType().toUpperCase() : respInfo.getInferredMimeType().toUpperCase(); //Uppercase is applied because to make the content-type uniform
                     URL urlRequested = reqInfo.getUrl();
                     String urlString = getUrl(reqInfo);
                     String protoAndHost = urlRequested.getProtocol() + "://" + urlRequested.getHost();
+
+                    if("".equals(mimeType) || "TEXT".equals(mimeType)) {
+                        String pathSegment = urlRequested.getPath();
+                        if(pathSegment.contains(".")) {
+                            //No content-type is returned when the server return a Not Modified response
+                            String extension = pathSegment.substring(pathSegment.lastIndexOf(".")).replace(".","").toUpperCase();
+                            mimeType = extension;
+                        }
+                    }
+                    if("TXT".equals(mimeType)) {
+                        mimeType = "TEXT";
+                    }
+                    if("JS".equals(mimeType)) {
+                        mimeType = "SCRIPT";
+                    }
+                    if("JPG".equals(mimeType)) {
+                        mimeType = "JPEG";
+                    }
+
 
                     boolean isRequestToDomain = protoAndHost.equals(domain);
 
@@ -213,10 +234,6 @@ public class ConfigurationHelperTab implements ITab, CspGeneratorPanelController
 
         String directive = null;
         switch (mimeType) {
-            //case "HTML": return "frame-ancestors";
-//            case "APPLET":
-//            case "JAR":
-//                return "object-src";
             case "CSS":
                 directive = "style-src";
                 break;
@@ -224,6 +241,8 @@ public class ConfigurationHelperTab implements ITab, CspGeneratorPanelController
             case "JPG":
             case "JPEG":
             case "GIF":
+            case "SVG":
+            case "WEBP":
                 directive = "img-src";
                 break;
             case "SCRIPT":
@@ -240,13 +259,14 @@ public class ConfigurationHelperTab implements ITab, CspGeneratorPanelController
                 directive = "media-src";
                 break;
             default:
-                Log.debug("Unknown MimeType "+mimeType);
+                //Log.debug("Unknown MimeType "+mimeType);
         }
 
         if(directive != null) {
             csp.addDirectiveValue(directive, host);
             if(host.equals("https://fonts.googleapis.com")) {
                 csp.addDirectiveValue("style-src", "https://fonts.gstatic.com");
+                csp.addDirectiveValue("font-src", "https://fonts.gstatic.com");
             }
         }
 
@@ -327,12 +347,13 @@ public class ConfigurationHelperTab implements ITab, CspGeneratorPanelController
 
     private void displayConfiguration(ContentSecurityPolicy policy) {
 
-        IMessageEditor msg = callbacks.createMessageEditor(null, true);
-
         StringBuilder str = new StringBuilder();
+        str.append("HTTP/1.1 200 OK\r\n"); //Only to have a valid response so that the "new" syntax highlight is effective.
         str.append("Content-Security-Policy: ");
         str.append(policy.toHeaderString());
-        str.append("\n\n");
+        str.append("\r\n\r\n");
+
+        IMessageEditor msg = callbacks.createMessageEditor(null, true);
 
         msg.setMessage(str.toString().getBytes(), false);
 

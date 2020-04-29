@@ -4,6 +4,7 @@ import com.esotericsoftware.minlog.Log;
 import main.java.ca.gosecure.cspauditor.gui.generator.SortedUniqueComboBoxModel;
 
 import javax.swing.*;
+import javax.swing.event.HyperlinkEvent;
 import javax.swing.event.ListSelectionEvent;
 import javax.swing.table.DefaultTableModel;
 import java.awt.*;
@@ -24,10 +25,10 @@ public class CspGeneratorPanel {
     private JPanel resourcePanel;
     private JTable inlinesTable;
     private JPanel inlinePanel;
-    private JPanel test;
+    private JPanel configTabPanel;
     private JTable reportsTable;
     private JPanel reportPanel;
-    private JPanel warningConfiguration;
+    private JTextPane warningConfigurationTextPane;
 
     DefaultTableModel tableResourcesModel = new DefaultTableModel() {
         @Override
@@ -122,6 +123,20 @@ public class CspGeneratorPanel {
             @Override
             public void actionPerformed(ActionEvent e) {
                 controller.refreshDomains();
+            }
+        });
+
+        this.warningConfigurationTextPane.addHyperlinkListener(e -> {
+            if(e.getEventType() == HyperlinkEvent.EventType.ACTIVATED) {
+                if (Desktop.isDesktopSupported()) {
+                    try {
+                        Desktop.getDesktop().browse(e.getURL().toURI());
+                    } catch (Exception ex) {
+                        ex.printStackTrace();
+                    }
+                } else {
+                    System.out.println(e.getURL().toString()+" clicked");
+                }
             }
         });
     }
@@ -256,19 +271,20 @@ public class CspGeneratorPanel {
         resultTabbedPane = new JTabbedPane();
         resultTabbedPane.setTabLayoutPolicy(0);
         panel4.add(resultTabbedPane, BorderLayout.CENTER);
-        test = new JPanel();
-        test.setLayout(new BorderLayout(0, 0));
-        resultTabbedPane.addTab("Configuration", test);
+        configTabPanel = new JPanel();
+        configTabPanel.setLayout(new BorderLayout(0, 0));
+        resultTabbedPane.addTab("Configuration", configTabPanel);
         configurationPanel = new JPanel();
         configurationPanel.setLayout(new BorderLayout(0, 0));
-        test.add(configurationPanel, BorderLayout.CENTER);
+        configTabPanel.add(configurationPanel, BorderLayout.CENTER);
         final JPanel panel5 = new JPanel();
         panel5.setLayout(new BorderLayout(0, 0));
-        test.add(panel5, BorderLayout.NORTH);
-        final JTextPane textPane1 = new JTextPane();
-        textPane1.setEditable(false);
-        textPane1.setText("Warning: The following configuration might not be complete. Refer to \"Inline Scripts\" to see scripts that are not compatible with CSP strict mode (No use of \"script-src 'unsafe-inline'\").");
-        panel5.add(textPane1, BorderLayout.CENTER);
+        configTabPanel.add(panel5, BorderLayout.SOUTH);
+        warningConfigurationTextPane = new JTextPane();
+        warningConfigurationTextPane.setEditable(false);
+        warningConfigurationTextPane.setContentType("text/html");
+        warningConfigurationTextPane.setText("<html>   <head>        </head>   <body>     <b>Warning</b>: Refer to &quot;Inline Scripts&quot; to see scripts that are not      compatible with CSP strict mode (Directive &quot;script-src 'unsafe-inline'&quot; is not included.).<br><a href=\"https://www.gosecure.net/blog/2016/06/28/auditing-csp-headers-with-burp-and-zap/#passives-rules\">More      information on CSP pitfalls</a>   </body> </html> ");
+        panel5.add(warningConfigurationTextPane, BorderLayout.CENTER);
         final JPanel panel6 = new JPanel();
         panel6.setLayout(new BorderLayout(0, 0));
         resultTabbedPane.addTab("External Resources", panel6);
