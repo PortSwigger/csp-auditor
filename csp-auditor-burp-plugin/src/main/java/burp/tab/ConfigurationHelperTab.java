@@ -3,7 +3,9 @@ package burp.tab;
 import burp.IBurpExtenderCallbacks;
 import burp.IExtensionHelpers;
 import burp.IHttpRequestResponse;
+import burp.IHttpService;
 import burp.IMessageEditor;
+import burp.IMessageEditorController;
 import burp.IRequestInfo;
 import burp.IResponseInfo;
 import burp.ITab;
@@ -13,6 +15,7 @@ import ca.gosecure.cspauditor.gui.generator.CspGeneratorPanelController;
 import java.awt.*;
 import java.net.MalformedURLException;
 import java.net.URL;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.SortedSet;
@@ -23,6 +26,8 @@ import ca.gosecure.cspauditor.model.generator.DetectInlineJavascript;
 import com.esotericsoftware.minlog.Log;
 import org.json.JSONException;
 import org.json.JSONObject;
+
+import javax.swing.*;
 
 /**
  * Tab that contains three parts :
@@ -68,101 +73,167 @@ public class ConfigurationHelperTab implements ITab, CspGeneratorPanelController
 
     @Override
     public void analyzeDomain(String domain) {
+        Log.debug("Analyzing domain " + domain);
+        AnalyzeDomainTask task = new AnalyzeDomainTask(domain);
+        task.execute();
+    }
 
-        IHttpRequestResponse[] reqResponses = callbacks.getProxyHistory();
+    protected class AnalyzeDomainTask extends SwingWorker<Void, Void> {
 
-        ContentSecurityPolicy csp = new ContentSecurityPolicy("CSP");
-        csp.addDirectiveValue("default-src","self");
-        try {
-            URL domainSelected = new URL(domain);
-            Log.debug("Analysing domain "+domain);
-            panel.clearResources();
-            panel.clearInlineScript();
-            panel.clearReports();
-            int id = 0;
-            for (IHttpRequestResponse reqResp : reqResponses) {
-                id++;
-                Log.debug("Request "+id);
-                IRequestInfo reqInfo = helpers.analyzeRequest(reqResp.getHttpService(), reqResp.getRequest());
-                if (reqResp.getResponse() == null) continue;
-                IResponseInfo respInfo = helpers.analyzeResponse(reqResp.getResponse());
+        String domain;
 
-                String mimeType = respInfo.getInferredMimeType().toUpperCase(); //Uppercase is applied because to make the content-type uniform
-
-                URL urlRequested = reqInfo.getUrl();
-                String urlString = getUrl(reqInfo);
-                String protoAndHost = urlRequested.getProtocol() + "://" + urlRequested.getHost();
-
-                boolean isRequestToDomain = protoAndHost.equals(domain);
-
-                //Finding inline script
-
-                String host = getHeader("host", reqInfo.getHeaders());
-                if (isRequestToDomain) {//Same-Origin
-                    if (mimeType.equals("HTML")) {
-                        List<String> problemInline = DetectInlineJavascript.getInstance().findInlineJs(new String(reqResp.getResponse()));
-
-                        for (String line : problemInline)
-                            panel.addInlineScript(String.valueOf(id), urlString, line);
-                    }
-                }
-
-
-                //Finding external resources
-
-                if (!isRequestToDomain) {//Different-Origin
-
-                    String referrer = getHeader("referer", reqInfo.getHeaders());
-                    if (referrer.startsWith("http://") || referrer.startsWith("https://")) { //Just to make sure the URL will be parsable
-                        URL referrerUrl = new URL(referrer);
-                        if (domainSelected.getHost().equals(referrerUrl.getHost())) {
-                            panel.addResource(String.valueOf(id), urlString, mimeType);
-                            mimeTypeToDirective(mimeType, protoAndHost, csp);
-
-                        }
-                    }
-                }
-
-
-                byte[] completeRequest = reqResp.getRequest();
-                int startOffset = reqInfo.getBodyOffset();
-                if(completeRequest.length - startOffset != 0) { //Skip GET request
-                    byte[] part = Arrays.copyOfRange(completeRequest, startOffset, completeRequest.length);
-                    String body = new String(part);
-                    if (body.contains("{\"csp-report\":{")) {
-                        try {
-                            JSONObject rootJson = new JSONObject(body);
-                            String blockedUri        = rootJson.getJSONObject("csp-report").getString("blocked-uri");
-                            String documentUri       = rootJson.getJSONObject("csp-report").getString("document-uri");
-                            String originalPolicy    = rootJson.getJSONObject("csp-report").getString("original-policy");
-                            String violatedDirective = rootJson.getJSONObject("csp-report").getString("violated-directive");
-                            panel.addReport(String.valueOf(id), blockedUri, documentUri, originalPolicy, violatedDirective);
-                        }
-                        catch (JSONException e){ //Invalid csp-report
-                            Log.error("Invalid CSP report at "+urlString);
-                        }
-                    }
-                }
-
-            }
-        } catch (Exception e) {
-            Log.error(e.getMessage(),e);
+        public AnalyzeDomainTask(String domain) {
+            this.domain = domain;
         }
 
+        @Override
+        public Void doInBackground() {
+            IHttpRequestResponse[] reqResponses = callbacks.getProxyHistory();
 
-        csp.addDirectiveValue("report-uri", "/change-this-uri/");
-        displayConfiguration(csp);
-        Log.debug("Done analyzing "+domain);
+            ContentSecurityPolicy csp = new ContentSecurityPolicy("CSP");
+            csp.addDirectiveValue("default-src","'self'");
+            try {
+                URL domainSelected = new URL(domain);
+                Log.debug("Analysing domain " + domain);
+                panel.clearResources();
+                panel.clearInlineScript();
+                panel.clearReports();
+                int id = 0;
+                for (IHttpRequestResponse reqResp : reqResponses) {
+                    id++;
+                    //Log.debug("Request "+id);
+                    IRequestInfo reqInfo = helpers.analyzeRequest(reqResp.getHttpService(), reqResp.getRequest());
+                    if (reqResp.getResponse() == null) continue;
+                    IResponseInfo respInfo = helpers.analyzeResponse(reqResp.getResponse());
+
+                    String mimeType = respInfo.getStatedMimeType() != "" ? respInfo.getStatedMimeType().toUpperCase() : respInfo.getInferredMimeType().toUpperCase(); //Uppercase is applied because to make the content-type uniform
+                    URL urlRequested = reqInfo.getUrl();
+                    String urlString = getUrl(reqInfo);
+                    String protoAndHost = urlRequested.getProtocol() + "://" + urlRequested.getHost();
+
+                    if("".equals(mimeType) || "TEXT".equals(mimeType)) {
+                        String pathSegment = urlRequested.getPath();
+                        if(pathSegment.contains(".")) {
+                            //No content-type is returned when the server return a Not Modified response
+                            String extension = pathSegment.substring(pathSegment.lastIndexOf(".")).replace(".","").toUpperCase();
+                            mimeType = extension;
+                        }
+                    }
+                    if("TXT".equals(mimeType)) {
+                        mimeType = "TEXT";
+                    }
+                    if("JS".equals(mimeType)) {
+                        mimeType = "SCRIPT";
+                    }
+                    if("JPG".equals(mimeType)) {
+                        mimeType = "JPEG";
+                    }
+
+
+                    boolean isRequestToDomain = protoAndHost.equals(domain);
+
+                    //Finding inline script
+
+                    String host = getHeader("host", reqInfo.getHeaders());
+                    if (isRequestToDomain) {//Same-Origin
+                        if (mimeType.equals("HTML")) {
+                            List<String> problemInline = DetectInlineJavascript.getInstance().findInlineJs(new String(reqResp.getResponse()));
+
+                            for (String line : problemInline)
+                                panel.addInlineScript(String.valueOf(id), urlString, line);
+                        }
+                    }
+
+
+                    //Finding external resources
+
+                    if (!isRequestToDomain) {//Different-Origin
+
+                        String referrer = getHeader("referer", reqInfo.getHeaders());
+                        if (referrer.startsWith("http://") || referrer.startsWith("https://")) { //Just to make sure the URL will be parsable
+                            URL referrerUrl = new URL(referrer);
+                            if (domainSelected.getHost().equals(referrerUrl.getHost())) {
+                                panel.addResource(String.valueOf(id), urlString, mimeType);
+                                mimeTypeToDirective(mimeType, protoAndHost, csp);
+
+                            }
+                        }
+                    }
+
+                    byte[] completeRequest = reqResp.getRequest();
+                    int startOffset = reqInfo.getBodyOffset();
+                    if(completeRequest.length - startOffset != 0) { //Skip GET request
+                        byte[] part = Arrays.copyOfRange(completeRequest, startOffset, completeRequest.length);
+                        String body = new String(part);
+                        if (body.contains("{\"csp-report\":{")) {
+                            try {
+                                JSONObject rootJson = new JSONObject(body);
+                                String documentUri       = rootJson.getJSONObject("csp-report").getString("document-uri");
+                                String originalPolicy    = rootJson.getJSONObject("csp-report").getString("original-policy");
+                                // chrome sends just the directive. firefox sends directive + sources. e.g. script-src https://domain.com ...
+                                String violatedDirective = rootJson.getJSONObject("csp-report").getString("violated-directive").split(" ")[0];
+                                String blockedUri;
+
+                                if (violatedDirective.equalsIgnoreCase("frame-ancestors")) {
+                                    // the report's blocked-uri is the page that got framed, not the one that needs to be added to the policy.
+                                    blockedUri = rootJson.getJSONObject("csp-report").getString("referrer").split(" ")[0];
+                                    if (blockedUri.isEmpty())
+                                        continue; // browsers won't always send referrer, in which case we can't use the report.
+                                }
+                                else{
+                                    blockedUri = rootJson.getJSONObject("csp-report").getString("blocked-uri");
+                                }
+
+                                String newSrc = blockedUri;
+                                try {
+                                    URL url = new URL(blockedUri);
+                                    String port = url.getPort() == -1 ? "" : ":" + Integer.toString(url.getPort());
+                                    newSrc = url.getProtocol() + "://" + url.getHost() + port;
+                                }
+                                catch (MalformedURLException e) {
+                                    if (blockedUri.equalsIgnoreCase("inline")
+                                            || blockedUri .equalsIgnoreCase("eval")){
+                                        newSrc = "'unsafe-" + blockedUri + "'";
+                                    }
+                                    else if (blockedUri.equalsIgnoreCase("data") || blockedUri.equalsIgnoreCase("blob")){
+                                        newSrc = blockedUri + ":";
+                                    }
+                                    else {
+                                        Log.error("Invalid blocked uri", blockedUri);
+                                    }
+                                }
+
+                                if (newSrc.equalsIgnoreCase(domain)) {
+                                    newSrc = "'self'";
+                                }
+
+                                csp.addDirectiveValue(violatedDirective, newSrc);
+                                panel.addReport(String.valueOf(id), blockedUri, documentUri, originalPolicy, violatedDirective);
+                            }
+                            catch (JSONException e){ //Invalid csp-report
+                                Log.error("Invalid CSP report at "+urlString);
+                            }
+                        }
+                    }
+
+                }
+            } catch (Exception e) {
+                Log.error(e.getMessage(),e);
+            }
+
+            csp.addDirectiveValue("report-uri", "/change-this-uri/");
+            displayConfiguration(csp);
+            Log.debug("Done analyzing "+domain);
+
+            return null;
+        }
+
     }
 
     private void mimeTypeToDirective(String mimeType,String host,ContentSecurityPolicy csp) {
 
         String directive = null;
         switch (mimeType) {
-            //case "HTML": return "frame-ancestors";
-//            case "APPLET":
-//            case "JAR":
-//                return "object-src";
             case "CSS":
                 directive = "style-src";
                 break;
@@ -170,6 +241,8 @@ public class ConfigurationHelperTab implements ITab, CspGeneratorPanelController
             case "JPG":
             case "JPEG":
             case "GIF":
+            case "SVG":
+            case "WEBP":
                 directive = "img-src";
                 break;
             case "SCRIPT":
@@ -186,13 +259,14 @@ public class ConfigurationHelperTab implements ITab, CspGeneratorPanelController
                 directive = "media-src";
                 break;
             default:
-                Log.debug("Unknown MimeType "+mimeType);
+                //Log.debug("Unknown MimeType "+mimeType);
         }
 
         if(directive != null) {
             csp.addDirectiveValue(directive, host);
             if(host.equals("https://fonts.googleapis.com")) {
                 csp.addDirectiveValue("style-src", "https://fonts.gstatic.com");
+                csp.addDirectiveValue("font-src", "https://fonts.gstatic.com");
             }
         }
 
@@ -200,20 +274,38 @@ public class ConfigurationHelperTab implements ITab, CspGeneratorPanelController
 
     @Override
     public void refreshDomains() {
-
         Log.debug("Refreshing the domain list");
-        IHttpRequestResponse[] reqResponses = callbacks.getProxyHistory();
+        DomainRefreshTask task = new DomainRefreshTask();
+        task.execute();
+    }
+
+    protected class DomainRefreshTask extends SwingWorker<SortedSet<String>, String> {
+
         SortedSet<String> hosts = new TreeSet<>();
-        for (IHttpRequestResponse reqResp : reqResponses) {
-            IRequestInfo reqInfo = helpers.analyzeRequest(reqResp.getHttpService(), reqResp.getRequest());
-            hosts.add(reqInfo.getUrl().getProtocol() + "://" + reqInfo.getUrl().getHost());
+
+        @Override
+        public SortedSet<String> doInBackground() {
+            IHttpRequestResponse[] reqResponses = callbacks.getProxyHistory();
+            hosts = new TreeSet<>();
+            for (IHttpRequestResponse reqResp : reqResponses) {
+                if ( !isCancelled() ) {
+                    IRequestInfo reqInfo = helpers.analyzeRequest(reqResp.getHttpService(), reqResp.getRequest());
+                    String domain = reqInfo.getUrl().getProtocol() + "://" + reqInfo.getUrl().getHost();
+                    hosts.add(domain);
+                    publish(domain);
+                }
+            }
+
+            return hosts;
         }
 
-//        for (String h : hosts) {
-//            Log.debug(h);
-//        }
+        @Override
+        public void process(List<String> domains) {
+            for (String domain : domains) {
+                panel.addDomain(domain);
+            }
+        }
 
-        panel.addDomains(hosts);
     }
 
     @Override
@@ -255,12 +347,13 @@ public class ConfigurationHelperTab implements ITab, CspGeneratorPanelController
 
     private void displayConfiguration(ContentSecurityPolicy policy) {
 
-        IMessageEditor msg = callbacks.createMessageEditor(null, true);
-
         StringBuilder str = new StringBuilder();
+        str.append("HTTP/1.1 200 OK\r\n"); //Only to have a valid response so that the "new" syntax highlight is effective.
         str.append("Content-Security-Policy: ");
         str.append(policy.toHeaderString());
-        str.append("\n\n");
+        str.append("\r\n\r\n");
+
+        IMessageEditor msg = callbacks.createMessageEditor(null, true);
 
         msg.setMessage(str.toString().getBytes(), false);
 

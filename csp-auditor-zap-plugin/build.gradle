@@ -1,5 +1,5 @@
 group 'csp-auditor'
-version '1.0-SNAPSHOT'
+version '2.0-SNAPSHOT'
 
 repositories {
     flatDir {
@@ -22,7 +22,7 @@ dependencies {
 
 
 jar{
-    archiveName 'cspauditor-alpha-1.zap'
+    archiveName 'cspauditor-alpha-2.zap'
 
     from {
         configurations.compile.findAll{

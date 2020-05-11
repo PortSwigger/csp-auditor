@@ -57,7 +57,7 @@
                 </properties>
                 <border type="none"/>
                 <children>
-                  <grid id="53f8b" binding="test" layout-manager="BorderLayout" hgap="0" vgap="0">
+                  <grid id="53f8b" binding="configTabPanel" layout-manager="BorderLayout" hgap="0" vgap="0">
                     <constraints>
                       <tabbedpane title="Configuration"/>
                     </constraints>
@@ -71,15 +71,16 @@
                         <children/>
                       </grid>
                       <grid id="b138b" layout-manager="BorderLayout" hgap="0" vgap="0">
-                        <constraints border-constraint="North"/>
+                        <constraints border-constraint="South"/>
                         <properties/>
                         <border type="none"/>
                         <children>
-                          <component id="dc35c" class="javax.swing.JTextPane" default-binding="true">
+                          <component id="c667" class="javax.swing.JTextPane" binding="warningConfigurationTextPane">
                             <constraints border-constraint="Center"/>
                             <properties>
+                              <contentType value="text/html"/>
                               <editable value="false"/>
-                              <text value="Warning: The following configuration might not be complete. Refer to &quot;Inline Scripts&quot; to see scripts that are not compatible with CSP strict mode (No use of &quot;script-src 'unsafe-inline'&quot;)."/>
+                              <text value="&lt;html&gt;&#10;  &lt;head&gt;&#10;    &#10;  &lt;/head&gt;&#10;  &lt;body&gt;&#10;    &lt;b&gt;Warning&lt;/b&gt;: Refer to &amp;quot;Inline Scripts&amp;quot; to see scripts that are not &#10;    compatible with CSP strict mode (Directive &amp;quot;script-src 'unsafe-inline'&amp;quot; is &#10;    not included.).&lt;br&gt;&lt;a href=&quot;https://www.gosecure.net/blog/2016/06/28/auditing-csp-headers-with-burp-and-zap/#passives-rules&quot;&gt;More &#10;    information on CSP pitfalls&lt;/a&gt;&#10;  &lt;/body&gt;&#10;&lt;/html&gt;&#10;"/>
                             </properties>
                           </component>
                         </children>

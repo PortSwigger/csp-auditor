@@ -4,7 +4,6 @@ import burp.scanner.CspHeaderScanner;
 import burp.tab.ConfigurationHelperTab;
 import com.esotericsoftware.minlog.Log;
 
-import java.io.IOException;
 import java.io.PrintWriter;
 
 public class BurpExtender implements IBurpExtender, IMessageEditorTabFactory {
@@ -32,12 +31,7 @@ public class BurpExtender implements IBurpExtender, IMessageEditorTabFactory {
         Log.setLogger(new Log.Logger() {
             @Override
             protected void print(String message) {
-                try {
-                    callbacks.getStdout().write(message.getBytes());
-                    callbacks.getStdout().write('\n');
-                } catch (IOException e) {
-                    System.err.println("Error while printing the log : " + e.getMessage()); //Very unlikely
-                }
+                callbacks.printOutput(message);
             }
         });
         Log.DEBUG();
